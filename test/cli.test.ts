@@ -19,6 +19,7 @@ const originalCursorProvider = PROVIDERS.cursor;
 const originalCopilotProvider = PROVIDERS.copilot;
 const originalGrokProvider = PROVIDERS.grok;
 const originalKimiProvider = PROVIDERS.kimi;
+const originalTraexProvider = PROVIDERS.traex;
 const originalXdgCacheHome = process.env.XDG_CACHE_HOME;
 let tempDir: string | undefined;
 
@@ -29,6 +30,7 @@ afterEach(() => {
   PROVIDERS.copilot = originalCopilotProvider;
   PROVIDERS.grok = originalGrokProvider;
   PROVIDERS.kimi = originalKimiProvider;
+  PROVIDERS.traex = originalTraexProvider;
   if (originalXdgCacheHome === undefined) delete process.env.XDG_CACHE_HOME;
   else process.env.XDG_CACHE_HOME = originalXdgCacheHome;
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -46,6 +48,7 @@ describe("CLI flag parsing", () => {
       "copilot",
       "grok",
       "kimi",
+      "traex",
     ]);
   });
 
@@ -66,7 +69,15 @@ describe("CLI flag parsing", () => {
   it("collects the boolean flags", () => {
     expect(parseFlags(["--json", "--full", "--allow-keychain-prompt"])).toEqual(
       {
-        providers: ["claude", "codex", "cursor", "copilot", "grok", "kimi"],
+        providers: [
+          "claude",
+          "codex",
+          "cursor",
+          "copilot",
+          "grok",
+          "kimi",
+          "traex",
+        ],
         json: true,
         full: true,
         tui: false,
@@ -562,7 +573,7 @@ describe("CLI quota rendering", () => {
 
     const full = await capture(["--provider", "claude,codex", "--full"]);
     expect(full).toContain(
-      "windows[2]{provider,id,label,percentRemaining,resetsAt,pace,reserve,burnMultiple,timeRemainingPercent,elapsedPercent,cycleSeconds,projectedExhaustedAt,confidence}:",
+      "windows[2]{provider,id,label,percentRemaining,resetsAt,pace,reserve,burnMultiple,timeRemainingPercent,elapsedPercent,cycleSeconds,projectedExhaustedAt,confidence,isDepleted}:",
     );
     expect(full).toContain("scopeAudit[2]{");
     expect(full).toContain("worstReserve");
@@ -693,6 +704,7 @@ describe("default TOON decision blocks", () => {
     PROVIDERS.copilot = providerWithQuota(signedOutCopilotQuota());
     PROVIDERS.grok = providerWithQuota(grokModelAuthOnlyQuota());
     PROVIDERS.kimi = providerWithQuota(rateLimitedKimiQuota());
+    PROVIDERS.traex = providerWithQuota(unavailableTraexQuota());
 
     const output = await capture([]);
     const named = new Set([
@@ -707,6 +719,7 @@ describe("default TOON decision blocks", () => {
       "cursor",
       "grok",
       "kimi",
+      "traex",
     ]);
   });
 
@@ -1024,6 +1037,7 @@ describe("CLI plumbing via the axi SDK", () => {
     PROVIDERS.copilot = providerWithAuth("copilot", "GitHub Copilot");
     PROVIDERS.grok = providerWithAuth("grok", "Grok");
     PROVIDERS.kimi = providerWithAuth("kimi", "Kimi");
+    PROVIDERS.traex = providerWithAuth("traex", "TraeX");
 
     const output = await capture(["--allow-keychain-prompt", "auth"]);
     expect(output).toContain(
@@ -1379,6 +1393,21 @@ function rateLimitedKimiQuota(): ProviderQuota {
       retryAfter: "2026-07-06T19:10:00Z",
       untrustedWindowIds: ["unparsed_limit_2"],
       sourcesTried: ["pi:kimi-coding"],
+    },
+  };
+}
+
+function unavailableTraexQuota(): ProviderQuota {
+  return {
+    provider: "traex",
+    label: "TraeX",
+    source: "unavailable",
+    windows: [],
+    state: {
+      status: "unavailable",
+      stale: false,
+      error: "traex_binary_missing",
+      sourcesTried: ["model-catalog"],
     },
   };
 }

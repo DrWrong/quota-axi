@@ -2,6 +2,7 @@ import { chmodSync, renameSync, writeFileSync } from "node:fs";
 import { cacheFilePath, ensurePrivateParent, readJsonFile } from "./lib/fs.js";
 import type {
   ProviderId,
+  ProviderModelTelemetry,
   ProviderQuota,
   ProviderSource,
   ProviderStatus,
@@ -11,6 +12,7 @@ import { PROVIDER_IDS } from "./types.js";
 
 const PROVIDER_SOURCES = [
   "oauth",
+  "cli",
   "cli-rpc",
   "api",
   "web",
@@ -117,6 +119,7 @@ function toCacheProvider(provider: ProviderQuota): ProviderQuota | undefined {
     source: provider.source,
     plan: provider.plan,
     windows: provider.windows,
+    models: provider.models,
     credits: provider.credits,
     state: {
       status: provider.state.status,
@@ -142,6 +145,12 @@ function normalizeCachedProvider(raw: unknown): ProviderQuota | undefined {
         .map(normalizeCachedWindow)
         .filter((window): window is QuotaWindow => Boolean(window))
     : [];
+  const rawModels = Array.isArray(data.models) ? data.models : undefined;
+  const models = rawModels
+    ? rawModels
+        .map(normalizeCachedModel)
+        .filter((model): model is ProviderModelTelemetry => Boolean(model))
+    : undefined;
   if (
     !provider ||
     !label ||
@@ -150,6 +159,11 @@ function normalizeCachedProvider(raw: unknown): ProviderQuota | undefined {
     !status ||
     !sourcesTried ||
     windows.length === 0 ||
+    (provider === "traex" &&
+      (!models ||
+        models.length === 0 ||
+        models.length !== rawModels?.length ||
+        hasInvalidTraexCacheIdentities(windows, models))) ||
     (provider === "codex" && hasInvalidCodexWindowIdentities(windows))
   )
     return undefined;
@@ -159,6 +173,7 @@ function normalizeCachedProvider(raw: unknown): ProviderQuota | undefined {
     label,
     source,
     windows,
+    ...(models ? { models } : {}),
     state: {
       status,
       stale: booleanValue(state.stale) ?? false,
@@ -174,6 +189,70 @@ function normalizeCachedProvider(raw: unknown): ProviderQuota | undefined {
   if (untrustedWindowIds) result.state.untrustedWindowIds = untrustedWindowIds;
   if (credits) result.credits = credits;
   return result;
+}
+
+function hasInvalidTraexCacheIdentities(
+  windows: QuotaWindow[],
+  models: ProviderModelTelemetry[],
+): boolean {
+  const byWindowId = new Map(windows.map((window) => [window.id, window]));
+  if (byWindowId.size !== windows.length) return true;
+  const catalogIds = new Set<string>();
+  const referencedWindowIds = new Set<string>();
+
+  for (const model of models) {
+    if (catalogIds.has(model.catalogId)) return true;
+    catalogIds.add(model.catalogId);
+    if (
+      model.load.stale ||
+      model.quota.stale ||
+      model.quota.sharing !== "unknown"
+    ) {
+      return true;
+    }
+
+    if (model.quota.status !== "authoritative") {
+      if (model.quota.scope || model.quota.windowIds.length > 0) return true;
+      continue;
+    }
+
+    const windowId = `model:${model.catalogId}:weekly`;
+    if (
+      model.quota.scope !== `model:${model.catalogId}` ||
+      model.quota.relationship !== "model_scoped" ||
+      model.quota.windowIds.length !== 1 ||
+      model.quota.windowIds[0] !== windowId
+    ) {
+      return true;
+    }
+    const window = byWindowId.get(windowId);
+    if (!window || !isValidCachedTraexWindow(window, model.name)) return true;
+    referencedWindowIds.add(windowId);
+  }
+
+  return referencedWindowIds.size !== windows.length;
+}
+
+function isValidCachedTraexWindow(
+  window: QuotaWindow,
+  modelName: string,
+): boolean {
+  const reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  return (
+    window.label === `${modelName} week` &&
+    window.kind === "model" &&
+    window.windowSeconds === 604_800 &&
+    typeof window.isDepleted === "boolean" &&
+    isPercent(window.percentUsed) &&
+    isPercent(window.percentRemaining) &&
+    Math.abs(window.percentUsed + window.percentRemaining - 100) <= 0.01 &&
+    (!window.isDepleted || window.percentRemaining === 0) &&
+    Number.isFinite(reset)
+  );
+}
+
+function isPercent(value: number | undefined): value is number {
+  return value !== undefined && value >= 0 && value <= 100;
 }
 
 function hasInvalidCodexWindowIdentities(windows: QuotaWindow[]): boolean {
@@ -325,6 +404,96 @@ function normalizeCachedWindow(raw: unknown): QuotaWindow | undefined {
   assignNumber(result, "windowSeconds", data.windowSeconds);
   assignNumber(result, "spentUsd", data.spentUsd);
   assignNumber(result, "limitUsd", data.limitUsd);
+  const isDepleted = booleanValue(data.isDepleted);
+  if (isDepleted !== undefined) result.isDepleted = isDepleted;
+  return result;
+}
+
+function normalizeCachedModel(
+  raw: unknown,
+): ProviderModelTelemetry | undefined {
+  const data = objectValue(raw);
+  if (!data) return undefined;
+  const catalogId = stringValue(data.catalogId);
+  const name = stringValue(data.name);
+  const displayName = stringValue(data.displayName);
+  const displayNameSource = literalValue(data.displayNameSource, [
+    "catalog",
+    "captain_mapping",
+  ] as const);
+  const load = objectValue(data.load);
+  const loadStatus = literalValue(load?.status, ["known", "unknown"] as const);
+  const loadStale = booleanValue(load?.stale);
+  const quota = objectValue(data.quota);
+  const quotaStatus = literalValue(quota?.status, [
+    "authoritative",
+    "not_reported",
+    "not_applicable",
+    "invalid",
+  ] as const);
+  const relationship = literalValue(quota?.relationship, [
+    "model_scoped",
+    "unknown",
+  ] as const);
+  const sharing = literalValue(quota?.sharing, [
+    "shared",
+    "independent",
+    "unknown",
+  ] as const);
+  const quotaStale = booleanValue(quota?.stale);
+  const windowIds = stringArrayValue(quota?.windowIds);
+  if (
+    !catalogId ||
+    !name ||
+    !displayName ||
+    !displayNameSource ||
+    !load ||
+    !loadStatus ||
+    loadStale === undefined ||
+    !quota ||
+    !quotaStatus ||
+    !relationship ||
+    !sharing ||
+    quotaStale === undefined ||
+    !windowIds
+  ) {
+    return undefined;
+  }
+
+  const loadPercent = numberValue(load.percent);
+  const loadReason = literalValue(load.reason, ["missing", "invalid"] as const);
+  if (
+    (loadStatus === "known" &&
+      (loadPercent === undefined || loadPercent < 0)) ||
+    (loadStatus === "unknown" && !loadReason)
+  ) {
+    return undefined;
+  }
+  const result: ProviderModelTelemetry = {
+    catalogId,
+    name,
+    displayName,
+    displayNameSource,
+    load: {
+      status: loadStatus,
+      ...(loadPercent !== undefined ? { percent: loadPercent } : {}),
+      stale: loadStale,
+      ...(loadReason ? { reason: loadReason } : {}),
+    },
+    quota: {
+      status: quotaStatus,
+      windowIds,
+      relationship,
+      sharing,
+      stale: quotaStale,
+    },
+  };
+  assignString(result, "configName", data.configName);
+  assignString(result, "backendModel", data.backendModel);
+  assignString(result, "catalogProvider", data.catalogProvider);
+  assignNumber(result, "contextWindow", data.contextWindow);
+  const scope = stringValue(quota.scope);
+  if (scope) result.quota.scope = scope;
   return result;
 }
 

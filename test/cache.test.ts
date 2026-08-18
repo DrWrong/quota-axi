@@ -213,6 +213,76 @@ describe("quota cache", () => {
     expect(cachedWindow?.pace).toBeUndefined();
   });
 
+  it("caches only normalized TraeX model telemetry and depletion evidence", () => {
+    useTempCache();
+    const sentinel = "TRAE-X-RAW-CATALOG-SENTINEL";
+    const traex: ProviderQuota = {
+      provider: "traex",
+      label: "TraeX",
+      source: "cli",
+      windows: [
+        {
+          id: "model:openrouter-3o:weekly",
+          label: "openrouter-3o week",
+          kind: "model",
+          percentUsed: 100,
+          percentRemaining: 0,
+          resetsAt: "2026-08-23T15:59:59.000Z",
+          windowSeconds: 604_800,
+          isDepleted: true,
+        },
+      ],
+      models: [
+        {
+          catalogId: "openrouter-3o",
+          name: "openrouter-3o",
+          backendModel: "openrouter-3o__dev",
+          catalogProvider: "trae",
+          contextWindow: 200_000,
+          displayName: "Claude Sonnet 4.8",
+          displayNameSource: "captain_mapping",
+          load: { status: "known", percent: 77, stale: false },
+          quota: {
+            status: "authoritative",
+            scope: "model:openrouter-3o",
+            windowIds: ["model:openrouter-3o:weekly"],
+            relationship: "model_scoped",
+            sharing: "unknown",
+            stale: false,
+          },
+        },
+      ],
+      state: {
+        status: "fresh",
+        stale: false,
+        refreshedAt: "2026-08-18T12:00:00.000Z",
+        sourcesTried: ["model-catalog"],
+      },
+      attempts: [
+        { source: "model-catalog", status: "success", error: sentinel },
+      ],
+    };
+
+    writeCachedProviders([traex]);
+
+    const bytes = readFileSync(cacheFilePath(), "utf8");
+    const cached = readCachedProvider("traex");
+    expect(bytes).not.toContain(sentinel);
+    expect(bytes).not.toContain("attempts");
+    expect(cached?.windows[0]?.isDepleted).toBe(true);
+    expect(cached?.models?.[0]).toMatchObject({
+      catalogId: "openrouter-3o",
+      displayName: "Claude Sonnet 4.8",
+      load: { status: "known", percent: 77, stale: false },
+      quota: {
+        status: "authoritative",
+        windowIds: ["model:openrouter-3o:weekly"],
+        sharing: "unknown",
+        stale: false,
+      },
+    });
+  });
+
   it("deletes a definitive-auth provider while retaining other snapshots", () => {
     useTempCache();
     writeCachedProviders([quota("claude", 10), quota("kimi", 20)]);
@@ -281,5 +351,6 @@ function providerLabel(provider: ProviderId): string {
   if (provider === "cursor") return "Cursor";
   if (provider === "copilot") return "GitHub Copilot";
   if (provider === "grok") return "Grok";
-  return "Kimi";
+  if (provider === "kimi") return "Kimi";
+  return "TraeX";
 }

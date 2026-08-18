@@ -15,10 +15,10 @@ Quota CLI for agents - designed with [AXI](https://axi.md) (Agent eXperience Int
 Agents need quota state before they choose where work can safely run.
 Vendor dashboards are not shaped for shell automation, and local CLIs expose different windows, resets, and auth sources.
 
-quota-axi reports local Claude, Codex, Cursor, GitHub Copilot, Grok, and Kimi quota windows in one [AXI](https://axi.md)-shaped call.
+quota-axi reports local Claude, Codex, Cursor, GitHub Copilot, Grok, Kimi, and TraeX quota windows in one [AXI](https://axi.md)-shaped call. TraeX additionally reports its model catalog's load telemetry without treating load as quota.
 It is data only: it never routes, recommends a provider, model, harness, credential, or route, proxies, intercepts, logs in, imports browser cookies, or mutates provider state. Default output has no ordering preference. The opt-in `models --sort runway` surface applies only its documented deterministic comparator to quota evidence, preserves all evidence and explicit ties, and is not a recommendation. It publishes one derived per-scope comparative selection signal, [`selection`](#per-scope-selection-signal), as data computed from figures it already reports; the consumer, not quota-axi, does any routing or ranking with it.
 
-- **Official sources** - quota-axi reads local provider auth sources and calls first-party quota, usage, billing, entitlement, or read-only credential-liveness endpoints used by the local agents, with a read-only Codex app-server probe as fallback.
+- **Official sources** - quota-axi reads local provider auth sources and calls first-party quota, usage, billing, entitlement, or read-only credential-liveness endpoints used by the local agents, with a read-only Codex app-server probe and the official read-only `traex models --json` catalog command where applicable.
 - **Local first** - quota and auth reports run on the machine that holds the credentials; their network calls go to first-party provider endpoints, never a third-party relay.
   The separate `update` command contacts npm only when the user runs it.
 - **Token efficient** - default stdout is compact TOON so agents spend fewer tokens parsing quota state, with `--json` available when a caller needs the normalized model.
@@ -33,9 +33,9 @@ After a successful read, future non-interactive quota calls reuse the correspond
 ```sh
 $ npx -y quota-axi
 bin: ~/.npm/_npx/.../quota-axi
-description: Report local agent-provider quota windows for routing-aware agents
+description: Report local agent-provider quota and model-load evidence
 generatedAt: "2026-03-15T16:42:00.000Z"
-quota[8]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[9]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,all_models,64,-0.3798,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
   claude,seven_day_opus,64,0.3218,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
   claude,"model:fable",64,-0.0932,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
@@ -44,6 +44,10 @@ quota[8]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidenc
   cursor,all_models,72,1.4067,through_reset,established,included_usage,"2026-04-01T00:00:00.000Z"
   grok,all_products,67,0.5778,through_reset,established,credits,"2026-04-01T00:00:00.000Z"
   kimi,all_models,74,0.2484,through_reset,established,weekly,"2026-03-20T12:17:02.400Z"
+  traex,"model:openrouter-3o",100,1,through_reset,early,"model:openrouter-3o:weekly","2026-03-22T16:42:00.000Z"
+modelLoad[2]{provider,catalogId,name,displayName,displayNameSource,loadStatus,loadPercent,loadReason,stale,quotaStatus,quotaScope,quotaWindows,quotaRelationship,quotaSharing}:
+  traex,openrouter-3o,openrouter-3o,Claude Sonnet 4.8,captain_mapping,known,77,none,false,authoritative,"model:openrouter-3o","model:openrouter-3o:weekly",model_scoped,unknown
+  traex,gpt-5.6-sol,GPT-5.6-Sol,GPT-5.6-Sol,catalog,known,125,none,false,not_reported,unknown,none,unknown,unknown
 exhaustion[5]{provider,scope,usableRunwaySeconds,projectedExhaustedAt,limitingWindowId}:
   claude,all_models,298906,"2026-03-19T03:43:45.600Z",seven_day
   claude,seven_day_opus,298906,"2026-03-19T03:43:45.600Z",seven_day
@@ -56,7 +60,7 @@ help[1]:
   Run `quota-axi --full` for windows, pace, reserve, and account evidence
 ```
 
-Default TOON is decision-shaped: `quota[]` carries one fully populated row per measurable scope, and the sparse `exhaustion[]` and `attention[]` blocks carry the finite-runway and non-nominal facts. See [Default report blocks](#default-report-blocks).
+Default TOON is decision-shaped: `quota[]` carries one fully populated row per measurable scope, `modelLoad[]` carries explicitly separate model-load telemetry and quota joins, and the sparse `exhaustion[]` and `attention[]` blocks carry the finite-runway and non-nominal facts. See [Default report blocks](#default-report-blocks).
 
 `--json` emits the normalized model instead. Derivation inputs are demoted to `--full`; see [Output tiers](#output-tiers).
 
@@ -188,7 +192,7 @@ $ quota-axi --provider claude --json
 $ quota-axi auth
 bin: ~/.npm/_npx/.../quota-axi
 description: Inspect local quota auth sources without printing secret values
-auth[10]{provider,source,path,status,error}:
+auth[11]{provider,source,path,status,error}:
   claude,oauth-file,~/.claude/.credentials.json,available,none
   claude,keychain,none,skipped,keychain_prompt_required
   codex,auth-json,~/.codex/auth.json,available,none
@@ -199,6 +203,7 @@ auth[10]{provider,source,path,status,error}:
   grok,auth-json,~/.grok/auth.json,available,none
   kimi,pi:kimi-coding,none,available,none
   kimi,kimi-code-cli,none,available,none
+  traex,model-catalog,~/.local/bin/traex,available,none
 help[1]:
   Run `quota-axi --allow-keychain-prompt auth` to permit macOS Keychain access
 ```
@@ -272,7 +277,7 @@ It is generated from `src/skill.ts`; update it with `pnpm run build:skill` and v
 └───────────────┘       └──────────────┘
 ```
 
-- **Live first** - direct provider HTTP calls use 15 second request timeouts, Codex JSON-RPC reads use short per-call timeouts, and stale cache fallback is per provider.
+- **Live first** - direct provider HTTP calls use 15 second request timeouts, Codex JSON-RPC reads use short per-call timeouts, the TraeX catalog uses an 8 second timeout and bounded output, and stale cache fallback is per provider.
 - **No first-run Keychain prompt** - macOS Claude and Cursor CLI Keychain value reads are skipped on plain calls until `--allow-keychain-prompt` succeeds once for that source, then future plain calls reuse the corresponding grant.
 - **Partial success is success** - one provider can fail while another returns fresh or stale data, and the process still exits 0. Exit code 1 means every provider failed, and 2 means a usage error.
 - **No token equivalence** - quota-axi does not claim that one provider percentage equals another provider percentage.
@@ -289,19 +294,19 @@ It is generated from `src/skill.ts`; update it with `pnpm run build:skill` and v
 
 ### Flags
 
-| Flag                                               | Description                                                        |
-| -------------------------------------------------- | ------------------------------------------------------------------ |
-| `--provider claude,codex,cursor,copilot,grok,kimi` | Scope providers                                                    |
-| `--json`                                           | Emit normalized JSON instead of TOON for quota, auth, or models    |
-| `--full`                                           | Include audit and derivation details                               |
-| `--tui`                                            | Render the live human terminal report instead of TOON (quota only) |
-| `--refresh 30s\|5m\|1h`                            | Live `--tui` refresh interval, default 5m (30s-24h)                |
-| `--once`                                           | Render one `--tui` frame and exit instead of staying live          |
-| `--allow-keychain-prompt`                          | Permit macOS provider Keychain access that could prompt            |
-| `--intelligence high\|medium\|low`                 | Filter `models` by editorial intelligence bucket                   |
-| `--sort runway`                                    | Explicitly sort `models` by documented usable-runway evidence      |
-| `-h`, `--help`                                     | Print terse [AXI](https://axi.md) help                             |
-| `-v`, `-V`, `--version`                            | Print version                                                      |
+| Flag                                                     | Description                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------ |
+| `--provider claude,codex,cursor,copilot,grok,kimi,traex` | Scope providers                                                    |
+| `--json`                                                 | Emit normalized JSON instead of TOON for quota, auth, or models    |
+| `--full`                                                 | Include audit and derivation details                               |
+| `--tui`                                                  | Render the live human terminal report instead of TOON (quota only) |
+| `--refresh 30s\|5m\|1h`                                  | Live `--tui` refresh interval, default 5m (30s-24h)                |
+| `--once`                                                 | Render one `--tui` frame and exit instead of staying live          |
+| `--allow-keychain-prompt`                                | Permit macOS provider Keychain access that could prompt            |
+| `--intelligence high\|medium\|low`                       | Filter `models` by editorial intelligence bucket                   |
+| `--sort runway`                                          | Explicitly sort `models` by documented usable-runway evidence      |
+| `-h`, `--help`                                           | Print terse [AXI](https://axi.md) help                             |
+| `-v`, `-V`, `--version`                                  | Print version                                                      |
 
 ### Human terminal report (`--tui`)
 
@@ -330,13 +335,14 @@ The package publishes TypeScript declarations from its package root, so consumer
 
 ### Default report blocks
 
-Default TOON is organized by the reading agent's decision rather than by quota-axi's data structures:
+Default TOON is organized by the reading agent's decision rather than by quota-axi's data structures. The three core blocks are always present; `modelLoad[]` is inserted only when a requested provider reports model telemetry:
 
-| Block          | Rows                                                                                                                                                                                                                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `quota[]`      | One row per **measurable** scope: `provider`, `scope`, `effectivePercentRemaining`, `spendPriority`, `runway`, `confidence`, `limitedBy`, `resetsAt`. Every column is populated on every row. `limitedBy` is the scope's `limitingWindowIds`, and `resetsAt` is that binding window's own reset. |
-| `exhaustion[]` | **Sparse.** One row per scope with a finite exhaustion point: `usableRunwaySeconds`, `projectedExhaustedAt`, `limitingWindowId`. `exhaustion[0]:` means nothing is projected to run out.                                                                                                         |
-| `attention[]`  | **Sparse.** Every non-nominal fact: `provider`, `scope`, `kind`, `detail`, `remedy`.                                                                                                                                                                                                             |
+| Block          | Rows                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `quota[]`      | One row per **measurable** scope: `provider`, `scope`, `effectivePercentRemaining`, `spendPriority`, `runway`, `confidence`, `limitedBy`, `resetsAt`. Every column is populated on every row. `limitedBy` is the scope's `limitingWindowIds`, and `resetsAt` is that binding window's own reset.                                                                               |
+| `modelLoad[]`  | One row per normalized catalog model when a provider supplies model telemetry. `loadStatus`, `loadPercent`, `loadReason`, and `stale` describe load only. `quotaStatus`, `quotaScope`, `quotaWindows`, `quotaRelationship`, and `quotaSharing` provide exact joins to `quota[]`/`windows[]`; they never turn load into quota. Missing load is `unknown` with reason `missing`. |
+| `exhaustion[]` | **Sparse.** One row per scope with a finite exhaustion point: `usableRunwaySeconds`, `projectedExhaustedAt`, `limitingWindowId`. `exhaustion[0]:` means nothing is projected to run out.                                                                                                                                                                                       |
+| `attention[]`  | **Sparse.** Every non-nominal fact: `provider`, `scope`, `kind`, `detail`, `remedy`.                                                                                                                                                                                                                                                                                           |
 
 A `quota[]` row whose `runway` is `projected_exhaustion` or `exhausted_now` has exactly one matching `exhaustion[]` row, joined on `provider` + `scope`. A row with `through_reset` or `unknown` has none, by definition: `through_reset` deliberately has no deadline and `unknown` has none to state.
 
@@ -363,7 +369,7 @@ An unknown or stale scope deliberately gets **no** `quota[]` row: the absence of
 
 ### Output tiers
 
-`--full` adds; it never subtracts. Default TOON carries the three decision blocks; `--full` TOON adds the `providers[]`, `windows[]`, `scopeAudit[]`, `accounts[]`, and `attempts[]` audit blocks. Default `--json` carries the normalized model with derivation inputs demoted; `--full` restores them with **no renames and no re-nesting** - a demoted field is simply absent until `--full`, in the exact position and under the exact name it has there.
+`--full` adds; it never subtracts. Default TOON carries the three core decision blocks plus `modelLoad[]` when model telemetry exists; `--full` TOON adds the `providers[]`, `windows[]`, `scopeAudit[]`, `accounts[]`, and `attempts[]` audit blocks. Default `--json` carries the normalized model with derivation inputs demoted; `--full` restores them with **no renames and no re-nesting** - a demoted field is simply absent until `--full`, in the exact position and under the exact name it has there.
 
 | Demoted to `--full` in `--json`                                                                                                       |
 | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -375,21 +381,31 @@ An unknown or stale scope deliberately gets **no** `quota[]` row: the absence of
 | `effectiveAvailability[].pace.behindWindowIds`, `onPaceWindowIds`                                                                     |
 | Account identity (`account`) and per-source `attempts`                                                                                |
 
-Everything a consumer branches on stays in the default tier: `state.status`, `stale`, `authStatus`, `error`, `reason`, `remedyCommand`, `retryAfter`, `untrustedWindowIds`; window `pace.status`, `reason`, `reservePercentPoints`, `burnMultiple`; `quotaSemantics.status` and `unresolvedWindowIds`; and every scope's `effectivePercentRemaining`, `boundedBy`, `limitingWindowIds`, `runway`, `selection`, and pace `aheadWindowIds` / `unknownWindowIds` / `worstReservePercentPoints`. `credits` also stays, so a consumer can avoid misreading it as exhaustion.
+Everything a consumer branches on stays in the default tier: `state.status`, `stale`, `authStatus`, `error`, `reason`, `remedyCommand`, `retryAfter`, `untrustedWindowIds`; window `isDepleted`, `pace.status`, `reason`, `reservePercentPoints`, `burnMultiple`; `quotaSemantics.status` and `unresolvedWindowIds`; every scope's `effectivePercentRemaining`, `boundedBy`, `limitingWindowIds`, `runway`, `selection`, and pace `aheadWindowIds` / `unknownWindowIds` / `worstReservePercentPoints`; and all normalized `models[]` identity/load/quota-join fields. `credits` also stays, so a consumer can avoid misreading it as exhaustion.
 
 `--tui` renders from the complete in-memory model, so demotion never changes what the human report draws.
 
 ### Quota report shape
 
-| Object                        | Fields                                                                                    |
-| ----------------------------- | ----------------------------------------------------------------------------------------- |
-| Quota report                  | `providers`                                                                               |
-| Provider report               | `provider`, `windows`, `quotaSemantics`, `state`, optional `plan`, and optional `credits` |
-| Provider report with `--full` | Also `label`, `source`, optional `account` identity, and per-source `attempts`            |
-| Account identity (`--full`)   | Optional `email`, `organization`, `accountId`, and `identityStatus`                       |
+| Object                        | Fields                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Quota report                  | `providers`                                                                                                     |
+| Provider report               | `provider`, `windows`, `quotaSemantics`, `state`, optional `plan`, `credits`, and normalized `models` telemetry |
+| Provider report with `--full` | Also `label`, `source`, optional `account` identity, and per-source `attempts`                                  |
+| Account identity (`--full`)   | Optional `email`, `organization`, `accountId`, and `identityStatus`                                             |
 
 Account identity and per-source `attempts` are omitted unless `--full` is passed.
 Claude `identityStatus` is `verified` only when Anthropic returns an authoritative account identifier; `email` and `organization` are display-only and must not be used for duplicate detection.
+
+### Model load and quota joins
+
+TraeX fills the additive `providers[].models[]` array from every valid record returned by `traex models --json`. `catalogId` is the exact `config_name` when one exists, otherwise the exact `name`; `name`, `configName`, `backendModel`, `catalogProvider`, and `contextWindow` preserve catalog identity without retaining the raw record. `openrouter-3o` alone has the operator-approved `displayName: "Claude Sonnet 4.8"` with `displayNameSource: "captain_mapping"`; that label is explicitly not claimed as catalog-supplied provider/model evidence.
+
+`load.status` is `known` only for a finite nonnegative `_meta.trae.load.percent`; values above 100 are preserved because load is not a quota percentage. Missing and malformed load are `unknown` with reason `missing` or `invalid`. `load.stale` is always explicit.
+
+`quota.status: authoritative` means the containing model supplied a structurally valid, applicable `_meta.trae.weeklyQuota`. Its `scope` joins exactly to `quotaSemantics.effectiveAvailability[].scope`, and `windowIds` joins to `windows[]`. `not_reported`, `not_applicable`, and `invalid` never create a quota window. Each model window preserves `usedPercent`, `remainingPercent`, `isDepleted`, and the Unix-seconds `resetTime` as ISO `resetsAt`, with the provider-owned weekly duration for pace. Zero remaining therefore produces `runway.status: exhausted_now`; load never contributes to remaining, pace, runway, or selection.
+
+The catalog output proves that each weekly object belongs to its containing model record, but neither `traex models --help` nor the catalog shape proves whether equal-looking objects share an account/family pool. quota-axi therefore keeps each window model-scoped, sets `quotaRelationship` to `model_scoped`, sets `quotaSharing` to `unknown`, leaves `quotaSemantics.status` partial, and never deduplicates by matching values or model names. A downstream consumer can join current load to the exact scope and inspect effective quota, reset-cycle pace/reserve, and runway without guessing; it still decides any scheduling itself.
 
 ### Provider `state`
 
@@ -460,7 +476,7 @@ reservePercentPoints = percentRemaining - timeRemainingPercent
 Pace is calculated only from trusted cycle evidence:
 
 - Prefer trusted `startsAt` + `resetsAt` pairs (Grok's provider-reported current period; Cursor's monthly billing cycle, whose start comes from the payload's cycle start or the previous renewal date).
-- Otherwise use provider-owned `windowSeconds` with `resetsAt` (Codex durations; Claude fixed 5h/7d; Kimi fixed 5h/weekly).
+- Otherwise use provider-owned `windowSeconds` with `resetsAt` (Codex durations; Claude fixed 5h/7d; Kimi fixed 5h/weekly; an applicable, valid TraeX `weeklyQuota`).
 - Do not infer monthly, rolling, or unlabeled periods.
 
 Every projection quota-axi publishes is cycle-average. There is deliberately no `projectionBasis` field: its absence means `cycle_average`, and a future non-cycle-average basis would name itself.
@@ -529,8 +545,8 @@ Any bounding window without usable pace makes the **whole scope** unmeasurable: 
 | Name                             | Values                                                                       |
 | -------------------------------- | ---------------------------------------------------------------------------- |
 | Provider statuses                | `fresh`, `stale`, `unavailable`, `auth_required`, `rate_limited`, or `error` |
-| Provider sources                 | `oauth`, `cli-rpc`, `api`, `web`, `cache`, or `unavailable`                  |
-| Current provider adapter sources | `oauth`, `cli-rpc`, `api`, `web`, `cache`, and `unavailable`                 |
+| Provider sources                 | `oauth`, `cli`, `cli-rpc`, `api`, `web`, `cache`, or `unavailable`           |
+| Current provider adapter sources | `oauth`, `cli`, `cli-rpc`, `api`, `web`, `cache`, and `unavailable`          |
 | Window kinds                     | `session`, `weekly`, `monthly`, `model`, `credits`, or `unknown`             |
 | Window pace statuses             | `ahead`, `on_pace`, `behind`, or `unknown`                                   |
 | Effective pace statuses          | `ahead`, `on_pace`, `behind`, `mixed`, or `unknown`                          |
@@ -555,6 +571,7 @@ Source attempts can include `credentialPresent` when a non-secret probe confirms
 | Grok                   | With a usable Grok CLI session bearer, can report the shared `credits` window, optional product-scoped `product:<slug>` windows, the current-period `startsAt` and reset, and optional prepaid credit balance from the consumer Usage-page operation. Pi `xai` auth alone establishes usability but cannot provide these consumer windows. Top-level `credits.remaining` is prepaid/on-demand balance, distinct from the shared period `windows` credits percentage used for effective availability. Pace prefers the startsAt/resetsAt pair.                                                                    |
 | Grok proto3 zero       | For the exact consumer operation only, an omitted usage float is the official proto3 zero when a valid weekly or monthly current period proves the config is present; quota-axi reports `0` used and `100` remaining rather than deriving usage from money.                                                                                                                                                                                                                                                                                                                                                      |
 | Kimi                   | Reports the principal `weekly` subscription window (with trusted 604,800s duration) plus every valid self-described limit in wire order. Only a limit whose normalized duration is exactly 18,000 seconds is identified as `five_hour`; future limits remain `limit:<index>` unknown windows.                                                                                                                                                                                                                                                                                                                    |
+| TraeX                  | Normalizes every valid `traex models --json` catalog record. A valid applicable `_meta.trae.weeklyQuota` becomes a distinct `model:<catalogId>:weekly` bound with provider-owned 604,800-second duration, Unix-seconds reset, supplied used/remaining percentages, and `isDepleted`. `_meta.trae.load.percent` remains separate model-load telemetry. Missing or invalid quota creates no window, and equal quota values are never treated as evidence of sharing.                                                                                                                                               |
 
 ### Model catalog and `models`
 
@@ -576,10 +593,10 @@ Default model order is deterministic and non-preferential: provider, then model 
 
 Auth source entries can include `credentialPresent` when a non-secret probe confirms a credential item exists.
 
-| Name                 | Values                                                                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auth source statuses | `available`, `missing`, `invalid`, `expired`, `skipped`, or `error`                                                                                       |
-| Auth source names    | `oauth-file`, `keychain`, `auth-json`, `auth-env`, `apps-json`, `state-vscdb`, `cli-keychain`, `cli-rpc`, `pi:kimi-coding`, `pi:xai`, and `kimi-code-cli` |
+| Name                 | Values                                                                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth source statuses | `available`, `missing`, `invalid`, `expired`, `skipped`, or `error`                                                                                                        |
+| Auth source names    | `oauth-file`, `keychain`, `auth-json`, `auth-env`, `apps-json`, `state-vscdb`, `cli-keychain`, `cli-rpc`, `pi:kimi-coding`, `pi:xai`, `kimi-code-cli`, and `model-catalog` |
 
 ## Security Posture
 
@@ -593,6 +610,7 @@ Auth source entries can include `credentialPresent` when a non-secret probe conf
 | GitHub Copilot | `$GITHUB_COPILOT_APPS_JSON` when set or the local Copilot apps auth file                                                                                                                                                                                                                                                                                                    |
 | Grok           | Grok CLI session auth from `$GROK_AUTH_JSON`, inline `$GROK_AUTH`, `$GROK_AUTH_PATH`, or `$GROK_HOME/auth.json` / `~/.grok/auth.json`, plus Pi's independent `$PI_CODING_AGENT_DIR/auth.json` `xai` entry (default `~/.pi/agent/auth.json`) for OAuth or literal API-key model auth                                                                                         |
 | Kimi           | Pi's `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`) for a literal `kimi-coding` API key or unexpired OAuth access token first, then a fresh official Kimi Code CLI access token from `$KIMI_CODE_HOME/credentials/kimi-code.json` (default `$HOME/.kimi-code/credentials/kimi-code.json`)                                                               |
+| TraeX          | No credential file is read by quota-axi. It resolves `traex` from `PATH`, or the fail-closed absolute executable in `$QUOTA_AXI_TRAEX_BINARY`, and lets the CLI's read-only model-catalog command report whether its own session is usable.                                                                                                                                 |
 
 ### Provider notes
 
@@ -648,13 +666,21 @@ Auth source entries can include `credentialPresent` when a non-secret probe conf
 - It never uses `refresh_token`, accepts a custom Kimi origin, launches Pi or Kimi, makes a model request, refreshes or writes credentials, creates a device ID, imports cookies, sends device identity, retains raw responses, or exposes account, plan, token, or fingerprint data.
 - Definitive credential absence or rejection retires Kimi cache data. Transient fallback drops reset-expired windows and applies five-hour or seven-day age bounds to windows without resets.
 
+**TraeX**
+
+- It resolves `traex` from `PATH`. `QUOTA_AXI_TRAEX_BINARY` may pin an installation only with an absolute executable path; an empty, relative, missing, or non-executable override fails closed and never falls back to another binary.
+- It invokes exactly `traex models --json` as an argv array through `execFile`, never through a shell. The command has an 8 second timeout and independent 256 KiB stdout/stderr bounds. quota-axi never launches an agent/model turn, logs in, refreshes credentials, changes configuration, or invokes any other TraeX command.
+- Only normalized catalog identity, model load, and authoritative weekly-quota fields are retained. Raw stdout/stderr, descriptions, MIME lists, unknown metadata, and execution-error text are discarded; failures expose stable codes only.
+- `auth` runs the same read-only catalog probe and distinguishes `traex_binary_missing`, unsafe executable overrides, `traex_catalog_timeout`, `traex_catalog_malformed_json`, `traex_catalog_unauthenticated`, `traex_catalog_unsupported_shape`, `traex_catalog_output_oversized`, and `traex_catalog_execution_failed` without printing credential or raw command bytes.
+- Only transient command, timeout, size, JSON, or compatibility failures may use a same-source normalized snapshot. TraeX stale fallback is capped at five minutes because load is volatile, rejects reset-expired quota windows, and marks both `models[].load.stale` and `models[].quota.stale` true. Stale effective headroom, pace, runway, and selection remain unknown.
+
 ### Safety guarantees
 
 - Quota and auth HTTP requests go only to first-party provider usage, quota, billing, entitlement, or read-only credential-liveness endpoints with the user's local credentials.
 - The user-initiated `update` command is the only non-provider network surface, and it is not part of quota measurement.
 - It sends credential values only to the first-party provider request they authenticate.
 - It never prints, logs, or caches credential values.
-- It never launches the Claude, Cursor, Grok, Pi, or Kimi CLIs, so it cannot spend quota or mutate provider credentials while measuring them.
+- It never launches the Claude, Cursor, Grok, Pi, or Kimi CLIs. Its only TraeX process is the read-only `traex models --json` catalog command; it never launches a model turn or any login/control command.
 - It never routes, ranks a winner, or orders providers preferentially. Derived comparative signals, including `effectiveAvailability[].selection`, are published as data for the consumer to act on.
 
 ### Cache
@@ -672,6 +698,7 @@ Auth source entries can include `credentialPresent` when a non-secret probe conf
 | Claude cache fallback                  | Definitive missing/invalid credential and HTTP 401/403 failures retire the snapshot. Only transient failures may use a formerly fresh snapshot, with a seven-day provider bound plus reset and resetless-window pruning.                                                                                                                                              |
 | Codex cache identities                 | Cached Codex windows are accepted only when ID, label, kind, duration, and duplicate suffix order agree; stale snapshots with mismatched identities are rejected.                                                                                                                                                                                                     |
 | Grok cache provenance                  | Only snapshots produced by the current `web` consumer operation can be used as Grok stale fallback; legacy `api` billing-proxy snapshots are rejected.                                                                                                                                                                                                                |
+| TraeX cache fallback                   | Only normalized fresh `cli` model-catalog snapshots with quota windows are cached. Transient fallback is capped at five minutes, drops expired reset windows, marks model load and quota telemetry stale, and never treats stale telemetry as current scheduling evidence.                                                                                            |
 
 ## Development
 
