@@ -3,8 +3,8 @@ import { DESCRIPTION, TOP_HELP } from "./cli.js";
 // Trigger string Claude Code (and other agents) match against to auto-load the skill.
 // Kept terse and outcome-focused so it fires on "check quota/rate limits" intents.
 export const SKILL_DESCRIPTION =
-  "Report local Claude, Codex, Cursor, GitHub Copilot, Grok, and Kimi quota windows via the quota-axi CLI - remaining " +
-  "effective usable runway, percentages, reset times, cycle-average pace vs the reset clock, a per-scope selection signal, and provider status read from local auth sources, " +
+  "Report local Claude, Codex, Cursor, GitHub Copilot, Grok, Kimi, and TraeX quota windows via the quota-axi CLI - remaining " +
+  "effective usable runway, percentages, reset times, cycle-average pace vs the reset clock, a per-scope selection signal, TraeX model load, and provider status read from local auth sources, " +
   "with no routing, provider mutation, or default ordering preference. Use before deciding whether it is safe " +
   "to keep spending a provider's quota, when the user asks about usage, rate limits, pace, or " +
   "remaining quota, or when comparing local provider headroom.";
@@ -24,6 +24,7 @@ export const HERMES_TAGS = [
   "copilot",
   "grok",
   "kimi",
+  "traex",
   "cli",
 ];
 export const HERMES_CATEGORY = "observability";
@@ -65,8 +66,9 @@ quota evidence, preserves ties, and is never a recommendation. quota-axi additio
 derived per-scope comparative selection signal, \`effectiveAvailability[].selection\`, as data
 computed from figures it already reports; it still ranks nothing and routes nowhere, and the
 consumer decides what to do with it. It reads local provider auth sources and calls
-first-party provider quota, usage, billing, entitlement, or read-only credential-liveness endpoints; it never launches the
-Claude, Cursor, Grok, Pi, or Kimi CLIs, so it cannot spend the quota it measures.
+first-party provider quota, usage, billing, entitlement, or read-only credential-liveness endpoints. It never launches the
+Claude, Cursor, Grok, Pi, or Kimi CLIs. Its only TraeX process is the bounded, read-only
+\`traex models --json\` catalog command; it never launches a model turn or login/control command.
 
 ## When to use
 
@@ -77,10 +79,14 @@ or when comparing supported local provider headroom side by side.
 ## Workflow
 
 1. Run \`npx -y quota-axi\` for compact TOON output covering supported providers' quota windows.
-   Default TOON has three decision-shaped blocks. \`quota[]\` has one fully populated row per
+   Default TOON has three core decision-shaped blocks plus \`modelLoad[]\` when a requested
+   provider supplies model telemetry. \`quota[]\` has one fully populated row per
    measurable scope: \`provider\`, \`scope\`, \`effectivePercentRemaining\`, \`spendPriority\`,
-   \`runway\`, \`confidence\`, \`limitedBy\`, and the binding window's \`resetsAt\`. Sparse
-   \`exhaustion[]\` adds \`usableRunwaySeconds\`, \`projectedExhaustedAt\`, and \`limitingWindowId\`
+   \`runway\`, \`confidence\`, \`limitedBy\`, and the binding window's \`resetsAt\`.
+   \`modelLoad[]\` keeps \`loadStatus\`, \`loadPercent\`, \`loadReason\`, and \`stale\` explicitly
+   separate from quota, and supplies exact \`quotaScope\` / \`quotaWindows\` joins plus
+   relationship and sharing evidence. Sparse \`exhaustion[]\` adds \`usableRunwaySeconds\`,
+   \`projectedExhaustedAt\`, and \`limitingWindowId\`
    for the scopes with a finite exhaustion point only, joined back on \`provider\` + \`scope\`;
    \`exhaustion[0]:\` means nothing is projected to run out. Sparse \`attention[]\` carries every
    non-nominal fact as \`provider,scope,kind,detail,remedy\` - auth, staleness, state reasons,
@@ -90,7 +96,7 @@ or when comparing supported local provider headroom side by side.
    unknown or stale headroom gets no \`quota[]\` row at all - read its \`attention[]\` row instead
    of inferring a number. If that scope has finite runway, the attention detail preserves the
    runway verdict and limiting window without creating an orphan \`exhaustion[]\` row.
-2. Scope to one provider with \`--provider claude\` or to a subset with \`--provider cursor,copilot,grok,kimi\`.
+2. Scope to one provider with \`--provider claude\` or to a subset with \`--provider cursor,copilot,grok,kimi,traex\`.
 3. Pass \`--json\` for the normalized machine-readable model instead of TOON. Read
    \`quotaSemantics.effectiveAvailability\` rather than treating a model window in isolation:
    account windows can bound every model, and \`boundedBy\` names every window included in the
@@ -131,6 +137,13 @@ or when comparing supported local provider headroom side by side.
    \`reservePercentPoints\` and \`burnMultiple\`, \`quotaSemantics.status\` and
    \`unresolvedWindowIds\`, every scope's \`runway\` and \`selection\`, scope pace
    \`aheadWindowIds\`/\`unknownWindowIds\`, and \`credits\` (never read \`credits\` as exhaustion).
+   TraeX additionally fills \`providers[].models[]\`: load is known only when its own status says so,
+   can legitimately exceed 100, and never contributes to quota. Join an authoritative model
+   \`quota.scope\` to \`effectiveAvailability[].scope\` and its \`windowIds\` to \`windows[]\`. The
+   \`openrouter-3o\` display identity \`Claude Sonnet 4.8\` is an operator-approved mapping named by
+   \`displayNameSource: captain_mapping\`, not a provider/model relationship claimed by the catalog.
+   Missing TraeX quota is \`not_reported\`, not zero. Equal weekly objects stay separate with
+   \`sharing: unknown\`; quota-axi never infers a shared family/account pool from matching values.
 5. Run \`npx -y quota-axi auth\` to check local auth-source availability without printing
    secret values.
 6. On macOS, Claude and Cursor CLI Keychain value reads are skipped by default until the user
@@ -164,6 +177,12 @@ or when comparing supported local provider headroom side by side.
    Grok also reads that same Pi auth file for an independent \`xai\` OAuth or literal API-key
    entry and treats Grok as usable when either the Grok CLI session or Pi \`xai\` credential is
    valid.
+10. For TraeX, quota-axi resolves \`traex\` from \`PATH\`, or the fail-closed absolute executable
+    in \`QUOTA_AXI_TRAEX_BINARY\`, and invokes only \`traex models --json\` with an 8 second timeout
+    and bounded stdout/stderr. \`auth\` probes that same catalog surface. It never logs in, refreshes
+    credentials, changes TraeX state, or exposes raw command output. A transient cached report is
+    at most five minutes old and explicitly marks both model load and model quota stale; effective
+    headroom, pace, runway, and selection stay unknown until a live probe succeeds.
 
 ## Usage
 

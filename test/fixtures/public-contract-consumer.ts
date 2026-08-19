@@ -4,6 +4,7 @@ import {
   type EffectiveAvailability,
   type ModelQuotaRecord,
   type ModelsResponse,
+  type ProviderModelTelemetry,
   type QuotaAxiResponse,
 } from "quota-axi";
 
@@ -38,6 +39,22 @@ const scope: EffectiveAvailability = {
 const spendPriority: number | undefined =
   scope.selection?.[SELECTION_SCALAR_KEY];
 
+const traexModel: ProviderModelTelemetry = {
+  catalogId: "gpt-5.6-sol",
+  name: "GPT-5.6-Sol",
+  configName: "gpt-5.6-sol",
+  displayName: "GPT-5.6-Sol",
+  displayNameSource: "catalog",
+  load: { status: "known", percent: 125, stale: false },
+  quota: {
+    status: "not_reported",
+    windowIds: [],
+    relationship: "unknown",
+    sharing: "unknown",
+    stale: false,
+  },
+};
+
 // Demoted fields are optional in the published contract: default `--json`
 // omits them and `--full` supplies them.
 const demoted: Array<string | undefined> = [
@@ -49,5 +66,6 @@ const demoted: Array<string | undefined> = [
 
 void models;
 void spendPriority;
+void traexModel;
 void demoted;
 void compareModelsByRunway(model, model);

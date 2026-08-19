@@ -7,6 +7,7 @@ import type {
   EffectiveAvailability,
   ModelsResponse,
   ProviderId,
+  ProviderModelTelemetry,
   ProviderQuota,
   QuotaAxiResponse,
   QuotaSemantics,
@@ -67,11 +68,28 @@ type ProviderBlocks = {
   attention: AttentionRow[];
 };
 
+type ModelLoadRow = {
+  provider: ProviderId;
+  catalogId: string;
+  name: string;
+  displayName: string;
+  displayNameSource: ProviderModelTelemetry["displayNameSource"];
+  loadStatus: ProviderModelTelemetry["load"]["status"];
+  loadPercent: number | string;
+  loadReason: string;
+  stale: boolean;
+  quotaStatus: ProviderModelTelemetry["quota"]["status"];
+  quotaScope: string;
+  quotaWindows: string;
+  quotaRelationship: ProviderModelTelemetry["quota"]["relationship"];
+  quotaSharing: ProviderModelTelemetry["quota"]["sharing"];
+};
+
 /**
  * Render the default decision-shaped report: one `quota[]` row per measurable
- * scope, plus the sparse `exhaustion[]` and `attention[]` blocks. `--full` adds
- * the audit blocks. Demotion happens here, never at computation, so `--tui` and
- * the normalized model keep every field.
+ * scope, optional model-load telemetry, plus the sparse `exhaustion[]` and
+ * `attention[]` blocks. `--full` adds the audit blocks. Demotion happens here,
+ * never at computation, so `--tui` and the normalized model keep every field.
  */
 export function renderQuotaToon(
   response: QuotaAxiResponse,
@@ -79,14 +97,15 @@ export function renderQuotaToon(
   full: boolean,
 ): string {
   const { quota, exhaustion, attention } = quotaBlocks(response);
+  const modelLoad = modelLoadRows(response);
   const blocks = [
     encode({
       bin: collapseHome(binPath),
-      description:
-        "Report local agent-provider quota windows for routing-aware agents",
+      description: "Report local agent-provider quota and model-load evidence",
       generatedAt: response.generatedAt,
     }),
     encode({ quota }),
+    ...(modelLoad.length > 0 ? [encode({ modelLoad })] : []),
     encode({ exhaustion }),
     encode({ attention }),
   ];
@@ -94,6 +113,27 @@ export function renderQuotaToon(
   if (full) blocks.push(...auditBlocks(response));
   blocks.push(renderHelp(quotaHelpLines(response)));
   return blocks.filter(Boolean).join("\n");
+}
+
+function modelLoadRows(response: QuotaAxiResponse): ModelLoadRow[] {
+  return response.providers.flatMap((provider) =>
+    (provider.models ?? []).map((model) => ({
+      provider: provider.provider,
+      catalogId: model.catalogId,
+      name: model.name,
+      displayName: model.displayName,
+      displayNameSource: model.displayNameSource,
+      loadStatus: model.load.status,
+      loadPercent: model.load.percent ?? UNKNOWN,
+      loadReason: model.load.reason ?? NONE,
+      stale: model.load.stale,
+      quotaStatus: model.quota.status,
+      quotaScope: model.quota.scope ?? UNKNOWN,
+      quotaWindows: joinIds(model.quota.windowIds) ?? NONE,
+      quotaRelationship: model.quota.relationship,
+      quotaSharing: model.quota.sharing,
+    })),
+  );
 }
 
 /**
@@ -348,6 +388,7 @@ function auditBlocks(response: QuotaAxiResponse): string[] {
       cycleSeconds: window.pace?.cycleSeconds ?? UNKNOWN,
       projectedExhaustedAt: window.pace?.projectedExhaustedAt ?? UNKNOWN,
       confidence: window.pace?.projectionConfidence ?? UNKNOWN,
+      isDepleted: window.isDepleted ?? UNKNOWN,
     })),
   );
   const scopeAudit = response.providers.flatMap((provider) =>

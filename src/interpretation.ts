@@ -6,6 +6,7 @@ import {
 } from "./pace.js";
 import type {
   EffectiveAvailability,
+  ProviderModelTelemetry,
   ProviderQuota,
   QuotaSemantics,
   QuotaWindow,
@@ -93,6 +94,13 @@ function semanticsFor(
         provider.state.untrustedWindowIds ?? [],
         generatedAt,
       );
+    case "traex":
+      return traexSemantics(
+        provider.windows,
+        provider.models ?? [],
+        provider.state.untrustedWindowIds ?? [],
+        generatedAt,
+      );
     case "cursor":
       return cursorSemantics(provider.windows, generatedAt);
     case "copilot":
@@ -101,6 +109,45 @@ function semanticsFor(
         `quota-axi does not know whether ${provider.label ?? provider.provider}'s reported windows are independent or jointly bounding, so it does not claim an effective remaining percentage.`,
       );
   }
+}
+
+function traexSemantics(
+  windows: QuotaWindow[],
+  models: ProviderModelTelemetry[],
+  untrustedWindowIds: string[],
+  generatedAt: string,
+): QuotaSemantics {
+  const byId = new Map(windows.map((window) => [window.id, window]));
+  const referenced = new Set<string>();
+  const unresolved = new Set(untrustedWindowIds);
+  const effectiveAvailability: EffectiveAvailability[] = [];
+
+  for (const model of models) {
+    if (model.quota.status !== "authoritative" || !model.quota.scope) continue;
+    const modelWindows: QuotaWindow[] = [];
+    for (const id of model.quota.windowIds) {
+      referenced.add(id);
+      const window = byId.get(id);
+      if (window) modelWindows.push(window);
+      else unresolved.add(id);
+    }
+    if (modelWindows.length === model.quota.windowIds.length) {
+      effectiveAvailability.push(
+        availability(model.quota.scope, modelWindows, generatedAt),
+      );
+    }
+  }
+  for (const window of windows) {
+    if (!referenced.has(window.id)) unresolved.add(window.id);
+  }
+
+  return {
+    status: "partial",
+    description:
+      "Each valid TraeX weeklyQuota object is an authoritative bound on its containing catalog model. The catalog does not establish whether equal-looking objects share an account or family pool, so windows remain model-scoped, are never deduplicated by value, and cross-model sharing stays unknown.",
+    effectiveAvailability,
+    ...(unresolved.size > 0 ? { unresolvedWindowIds: [...unresolved] } : {}),
+  };
 }
 
 function claudeSemantics(

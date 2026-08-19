@@ -4,7 +4,8 @@ export type ProviderId =
   | "cursor"
   | "copilot"
   | "grok"
-  | "kimi";
+  | "kimi"
+  | "traex";
 
 export const PROVIDER_IDS = [
   "claude",
@@ -13,10 +14,12 @@ export const PROVIDER_IDS = [
   "copilot",
   "grok",
   "kimi",
+  "traex",
 ] as const satisfies readonly ProviderId[];
 
 export type ProviderSource =
   | "oauth"
+  | "cli"
   | "cli-rpc"
   | "api"
   | "web"
@@ -159,8 +162,51 @@ export type QuotaWindow = {
   windowSeconds?: number;
   spentUsd?: number;
   limitUsd?: number;
+  /** Provider-reported depletion flag, when distinct from percentage fields. */
+  isDepleted?: boolean;
   /** Cycle-average pace relative to generatedAt. Not cached. */
   pace?: QuotaPace;
+};
+
+export type ModelLoadTelemetry = {
+  status: "known" | "unknown";
+  /** Provider-reported load. It is not quota usage and is never clamped. */
+  percent?: number;
+  /** Explicit because cached load is not current scheduling evidence. */
+  stale: boolean;
+  /** Present only when load is unknown. */
+  reason?: "missing" | "invalid";
+};
+
+export type ModelQuotaTelemetry = {
+  status: "authoritative" | "not_reported" | "not_applicable" | "invalid";
+  /** Exact join key into quotaSemantics.effectiveAvailability. */
+  scope?: string;
+  /** Exact join keys into ProviderQuota.windows. */
+  windowIds: string[];
+  /** What the catalog record itself establishes about the quota object. */
+  relationship: "model_scoped" | "unknown";
+  /** Cross-model sharing is stated separately and never inferred by equality. */
+  sharing: "shared" | "independent" | "unknown";
+  /** Explicit because cached quota is not current scheduling evidence. */
+  stale: boolean;
+};
+
+/** Normalized provider catalog telemetry; currently populated by TraeX. */
+export type ProviderModelTelemetry = {
+  /** Stable catalog id: configName when supplied, otherwise the exact name. */
+  catalogId: string;
+  /** Exact catalog name. */
+  name: string;
+  configName?: string;
+  backendModel?: string;
+  catalogProvider?: string;
+  contextWindow?: number;
+  displayName: string;
+  /** Keeps an operator-approved alias distinct from catalog evidence. */
+  displayNameSource: "catalog" | "captain_mapping";
+  load: ModelLoadTelemetry;
+  quota: ModelQuotaTelemetry;
 };
 
 export type EffectiveAvailability = {
@@ -213,6 +259,8 @@ export type ProviderQuota = {
     identityStatus?: "verified" | "unverified";
   };
   windows: QuotaWindow[];
+  /** Model identity, load, and quota-window joins when a provider exposes them. */
+  models?: ProviderModelTelemetry[];
   quotaSemantics?: QuotaSemantics;
   credits?: {
     remaining?: number;
